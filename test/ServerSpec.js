@@ -410,6 +410,9 @@ describe('', function() {
 
           createSession(requestWithCookies, secondResponse, function() {
             var session = requestWithCookies.session;
+            // console.log('wwww');
+
+            // console.log(session);
             expect(session).to.be.an('object');
             expect(session.hash).to.exist;
             // expect(session.hash).to.be.cookie;  Should we use https://www.npmjs.com/package/chai-http
@@ -480,7 +483,7 @@ describe('', function() {
     });
   });
 
-  xdescribe('Sessions and cookies', function() {
+  describe('Sessions and cookies', function() {
     var requestWithSession;
     var cookieJar;
 
