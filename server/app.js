@@ -3,6 +3,7 @@ const path = require('path');
 const utils = require('./lib/hashUtils');
 const partials = require('express-partials');
 const Auth = require('./middleware/auth');
+const CookieParser = require('./middleware/cookieParser');
 const models = require('./models');
 const db = require('./db');
 
@@ -15,23 +16,21 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, '../public')));
 
+app.use(CookieParser);
+app.use(Auth.createSession);
 
 
-app.get('/',
-  (req, res) => {
-    session = req.session;
-    // TODO if session.userid exist send the user to login page
-    // else sen user t
-    res.render('index', { root: __dirname });
-  });
 
-app.get('/create',
-  (req, res) => {
-    res.render('index');
-  });
+app.get('/', Auth.verifySession, (req, res) => {
+  res.render('index');
+});
+
+app.get('/create', Auth.verifySession, (req, res) => {
+  res.render('index');
+});
 
 
-app.get('/links',
+app.get('/links', Auth.verifySession,
   (req, res, next) => {
     models.Links.getAll()
       .then(links => {
@@ -42,51 +41,8 @@ app.get('/links',
       });
   });
 
-app.post('/login',
-  (req, res, next) => {
-    var username = req.body.username;
-    var password = req.body.password;
-    var queryScript = `SELECT password, salt FROM users WHERE username = "${username}";`;
-    // console.log('username is ');
-    // console.log(password);
 
-    return db.queryAsync(queryScript)
-      .then((data) => {
-        data = data[0][0];
-        var hashedPassword = data.password;
-        var salt = data.salt;
-        if (!models.Users.compare(password, hashedPassword, salt)) {
-          res.redirect('/login');
-          return res.send('Invalid username or password');
-        }
-      })
-      .then(() =>{ res.redirect('/'); })
-      .catch(err => {
-        res.redirect('/login');
-        res.send('could not log in');
-      });
-
-  });
-
-app.post('/signup',
-  (req, res, next) => {
-    var username = req.body.username;
-    var password = req.body.password;
-
-    return models.Users.create({username, password})
-      .then((newuser) =>{
-        res.redirect('/');
-        return res.send('new user is created');
-      })
-      .catch(err => {
-        res.status(500);
-        res.redirect('/signup');
-        res.send('User already existed');
-      });
-
-  });
-
-app.post('/links',
+app.post('/links', Auth.verifySession,
   (req, res, next) => {
     var url = req.body.url;
     if (!models.Links.isValidUrl(url)) {
@@ -126,6 +82,97 @@ app.post('/links',
 // Write your authentication routes here
 /************************************************************/
 
+app.get('/login', (req, res) => {
+  res.render('login');
+});
+
+app.post('/login', (req, res, next) => {
+  var username = req.body.username;
+  var password = req.body.password;
+
+  return models.Users.get({ username })
+    .then(user => {
+
+      if (!user || !models.Users.compare(password, user.password, user.salt)) {
+        // user doesn't exist or the password doesn't match
+        throw new Error('Username and password do not match');
+      }
+
+      return models.Sessions.update({ hash: req.session.hash }, { userId: user.id });
+    })
+    .then(() => {
+      res.redirect('/');
+    })
+    .error(error => {
+      res.status(500).send(error);
+    })
+    .catch(() => {
+      res.redirect('/login');
+    });
+
+  // alternatively using query
+  // var queryScript = `SELECT password, salt FROM users WHERE username = "${username}";`;
+
+
+  // return db.queryAsync(queryScript)
+  //   .then((data) => {
+  //     data = data[0][0];
+  //     var hashedPassword = data.password;
+  //     var salt = data.salt;
+  //     if (!models.Users.compare(password, hashedPassword, salt)) {
+  //       res.redirect('/login');
+  //       return res.send('Invalid username or password');
+  //     }
+  //   })
+  //   .then(() =>{ res.redirect('/'); })
+  //   .catch(err => {
+  //     res.redirect('/login');
+  //     res.send('could not log in');
+  //   });
+
+});
+
+app.get('/signup', (req, res) => {
+  res.render('signup');
+});
+
+app.post('/signup', (req, res, next) => {
+  var username = req.body.username;
+  var password = req.body.password;
+
+  return models.Users.get({username})
+    .then(user => {
+      if (user) {
+        throw user;
+      }
+      return models.Users.create({username, password});
+    })
+    .then(results => {
+      return models.Sessions.update({ hash: req.session.hash }, { userId: results.insertId });
+    })
+    .then(() =>{
+      res.redirect('/');
+    })
+    .error(error => {
+      res.status(500).send(error);
+    })
+    .catch(err => {
+      res.redirect('/signup');
+    });
+
+});
+
+app.get('/logout', (req, res, next) => {
+  return models.Sessions.delete({ hash: req.cookies.shortlyid })
+    .then(() => {
+      res.clearCookie('shortlyid');
+      res.redirect('/login');
+    })
+    .error(err => {
+      res.status(500).send(err);
+    })
+  ;
+});
 
 
 /************************************************************/
